@@ -1,0 +1,6 @@
+__pycache__/
+wandb/
+trained_models/
+*.pkl
+.vscode/
+runs/
