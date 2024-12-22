@@ -1,7 +1,6 @@
 # docs and experiment results can be found at https://docs.cleanrl.dev/rl-algorithms/ppo/#ppopy
 import argparse
 import os
-import random
 import time
 from distutils.util import strtobool
 
@@ -9,10 +8,9 @@ import gymnasium as gym
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import torch.optim as optim
-import wandb
 
+import wandb
 from common.models import DiscreteActorGridVerseObs, DiscreteCriticGridVerseObs
 from common.utils import make_env, save, set_seed
 
@@ -22,13 +20,13 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--exp-name", type=str, default=os.path.basename(__file__).rstrip(".py"),
         help="the name of this experiment")
-    parser.add_argument("--exp-group", type=str, default=None,
+    parser.add_argument("--exp-group", type=str, default="memory_four_rooms",
         help="the group under which this experiment falls")
     parser.add_argument("--seed", type=int, default=1,
         help="seed of the experiment")
     parser.add_argument("--cuda", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="if toggled, cuda will be enabled by default")
-    parser.add_argument("--wandb-project", type=str, default="ppo_gv",
+    parser.add_argument("--wandb-project", type=str, default="ppo_gv_mdp_baselines",
         help="wandb project name")
     parser.add_argument("--wandb-dir", type=str, default="./",
         help="the wandb directory")
@@ -36,13 +34,13 @@ def parse_args():
     # Algorithm specific arguments
     parser.add_argument("--env-id", type=str, default="gridverse/gv_memory_four_rooms.7x7.yaml",
         help="the id of the environment")
-    parser.add_argument("--total-timesteps", type=int, default=25000000,
+    parser.add_argument("--total-timesteps", type=int, default=100000000,
         help="total timesteps of the experiments")
-    parser.add_argument("--maximum-episode-length", type=int, default=200,
+    parser.add_argument("--maximum-episode-length", type=int, default=100,
         help="maximum length for episodes for gym POMDP environment")
-    parser.add_argument("--learning-rate", type=float, default=2.5e-4,
+    parser.add_argument("--learning-rate", type=float, default=0.001,
         help="the learning rate of the optimizer")
-    parser.add_argument("--num-envs", type=int, default=4,
+    parser.add_argument("--num-envs", type=int, default=64,
         help="the number of parallel game environments")
     parser.add_argument("--num-steps", type=int, default=128,
         help="the number of steps to run in each environment per policy rollout")
@@ -52,9 +50,9 @@ def parse_args():
         help="the discount factor gamma")
     parser.add_argument("--gae-lambda", type=float, default=0.95,
         help="the lambda for the general advantage estimation")
-    parser.add_argument("--num-minibatches", type=int, default=4,
+    parser.add_argument("--num-minibatches", type=int, default=8,
         help="the number of mini-batches")
-    parser.add_argument("--update-epochs", type=int, default=4,
+    parser.add_argument("--update-epochs", type=int, default=8,
         help="the K epochs to update the policy")
     parser.add_argument("--norm-adv", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
         help="Toggles advantages normalization")
@@ -70,17 +68,17 @@ def parse_args():
         help="the maximum norm for the gradient clipping")
     parser.add_argument("--target-kl", type=float, default=None,
         help="the target KL divergence threshold")
-    
+
     # Checkpointing specific arguments
     parser.add_argument("--save", type=lambda x:bool(strtobool(x)), default=True, nargs="?", const=True,
         help="checkpoint saving during training")
     parser.add_argument("--save-checkpoint-dir", type=str, default="./trained_models/",
         help="path to directory to save checkpoints in")
-    parser.add_argument("--checkpoint-interval", type=int, default=1000000,
+    parser.add_argument("--checkpoint-interval", type=int, default=100000,
         help="how often to save checkpoints during training (in timesteps)")
     parser.add_argument("--resume", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="whether to resume training from a checkpoint")
-    parser.add_argument("--resume-checkpoint-path", type=str, default="trained_models/sac_gridverse_obs_discrete_action_8omwm63y/global_step_900000.pth",
+    parser.add_argument("--resume-checkpoint-path", type=str, default="trained_models/ppo_gridverse_obs_discrete_action_wkiznsen/global_step_40000000.pth",
         help="path to checkpoint to resume training from")
     parser.add_argument("--run-id", type=str, default=None,
         help="wandb unique run id for resuming")
@@ -187,7 +185,7 @@ if __name__ == "__main__":
     # TRY NOT TO MODIFY: start the game
     global_step = 0
     start_time = time.time()
-    next_obs, info = envs.reset()
+    next_obs, info = envs.reset(seed=args.seed)
     next_obs["agent"] = torch.tensor(next_obs["agent"], dtype=torch.float32).to(device)
     next_obs["agent_id_grid"] = torch.tensor(next_obs["agent_id_grid"]).to(device)
     next_obs["grid"] = torch.tensor(next_obs["grid"]).to(device)
@@ -233,9 +231,10 @@ if __name__ == "__main__":
                 device
             )
             next_obs["grid"] = torch.tensor(next_obs["grid"]).to(device)
-            next_terminated, next_truncated = torch.Tensor(terminated).to(
-                device
-            ), torch.Tensor(truncated).to(device)
+            next_terminated, next_truncated = (
+                torch.Tensor(terminated).to(device),
+                torch.Tensor(truncated).to(device),
+            )
 
             # Only print when at least 1 env is done
             if "final_info" not in infos:
@@ -381,7 +380,7 @@ if __name__ == "__main__":
 
         # Save checkpoints during training
         if args.save:
-            if (global_step / args.num_envs) % (args.checkpoint_interval / args.num_envs) == 0:
+            if (global_step) % (args.checkpoint_interval / args.num_envs) == 0:
                 # Save models
                 models = {
                     "actor_state_dict": actor.state_dict(),
